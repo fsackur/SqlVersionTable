@@ -41,6 +41,7 @@ function Get-SqlVersionTable {
                 Link = $Href;
             }
 
+            #Add properties dynamically based on table header. Not all tables have same columns
             for ($i=0; $i -lt $HeaderCells.Count; $i++) {
                 $Property = $HeaderCells[$i]
                 $ValueText = $Cells[$i]
@@ -58,8 +59,21 @@ function Get-SqlVersionTable {
                 }
 
                 $RowObj | Add-Member NoteProperty -Name $Property -Value $Value
-            }
-        
+            } #end for
+            
+
+            $RowObj | Add-Member NoteProperty -Name UpdateType -Value $(
+                switch -Regex ($RowObj.'KB / Description') {
+                    'Community Technology Preview' {'CTP'; break}
+                    'Release Candidate' {'RC'; break}
+                    'RTM' {'RTM'; break}
+                    'GDR' {'GDR'; break}
+                    'Hotfix' {'Hotfix'; break}
+                    'Cumulative update' {'CU'; break}
+                    'Service Pack' {'SP'; break}
+                    default {'Update'}
+                }
+            )
 
 
             $Output.Add($RowObj)
