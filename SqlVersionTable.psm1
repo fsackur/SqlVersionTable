@@ -15,6 +15,9 @@ function Get-SqlVersionTable {
         .Parameter UpdateType
         Filters output by update type, e.g. SP, RTM, CU.
 
+        .Parameter Refresh
+        Specifies to update cached version table from sqlserverbuilds.blogspot.com
+
         .Example
         PS C:\> Get-SqlVersionTable -Version '2008 R2', 2012, 2014 -UpdateType RTM, SP | ft Release, UpdateType, Build, 'KB / Description'
 
@@ -43,13 +46,25 @@ function Get-SqlVersionTable {
 
         [Parameter(Position=1)]
         [ValidateSet('CTP', 'RC', 'RTM', 'GDR', 'Hotfix', 'CU', 'SP', 'Update')]
-        [string[]]$UpdateType
-                
+        [string[]]$UpdateType,
+
+        [switch]$Refresh                
     )
+
+    $XmlPath = "$PSScriptRoot\SqlVersionTable.xml"
+    
+    $OutputFilter = {
+        $Version -contains $_.Release -and
+        (-not $PSBoundParameters.ContainsKey('UpdateType') -or ($UpdateType -contains $_.UpdateType))
+    }
+    
+    if (-not $Refresh -and (Test-Path $XmlPath)) {
+        return Import-Clixml $XmlPath | where $OutputFilter
+    }
     
     $Url = 'https://sqlserverbuilds.blogspot.com/'
     try {
-        #$Blog = Invoke-WebRequest $Url -ErrorAction Stop
+        $Blog = Invoke-WebRequest $Url -ErrorAction Stop
     } catch {
         Write-Error ([string]::Format(
             "Unable to fetch version table from {0}. {1}: {2}",
@@ -61,7 +76,7 @@ function Get-SqlVersionTable {
     }
 
     $Releases = 'v.Next', '2016', '2014', '2012', '2008 R2', '2008', '2005', '2000', '7.0'
-    $TableNums = $Version | foreach {$Releases.IndexOf($_)}
+    $TableNums = 0..$Releases.Count
 
     $Tables = $Blog.ParsedHtml.getElementsByTagName('Table') | select -Skip 2
 
@@ -83,7 +98,7 @@ function Get-SqlVersionTable {
 
             #Add properties dynamically based on table header. Not all tables have same columns
             for ($i=0; $i -lt $HeaderCells.Count; $i++) {
-                $Property = $HeaderCells[$i]
+                $Property = $HeaderCells[$i].Trim()
                 $ValueText = $Cells[$i]
 
                 if ($Property -match 'build|version') {
@@ -115,11 +130,21 @@ function Get-SqlVersionTable {
                 }
             )
 
-            if (-not $PSBoundParameters.ContainsKey('UpdateType') -or ($UpdateType -contains $RowObj.UpdateType)) {
-                $Output.Add($RowObj)
-            }
+            $Output.Add($RowObj)
+
         }
     }
 
-    return $Output
+    try {
+        $Output | Export-Clixml $XmlPath
+    } catch {
+        Write-Warning ([string]::Format(
+            "Unable to write version table to {0}. {1}: {2}",
+            $XmlPath,
+            $_.Exception.GetType().Name,
+            $_.Exception.Message
+        ))
+    }
+
+    return $Output | where $OutputFilter
 }
