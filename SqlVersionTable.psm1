@@ -1,20 +1,46 @@
 ﻿
 function Get-SqlVersionTable {
+    param(
+        [Parameter(Position=0)]
+        [Alias('Release')]
+        [ValidateSet('v.Next', '2016', '2014', '2012', '2008 R2', '2008', '2005', '2000', '7.0')]
+        [string[]]$Version = ('2016', '2014', '2012', '2008 R2')
+    )
+    
+    $Url = 'https://sqlserverbuilds.blogspot.co.uk/'
+    try {
+        $Blog = Invoke-WebRequest $Url -ErrorAction Stop
+    } catch {
+        Write-Error ([string]::Format(
+            "Unable to fetch version table from {0}. {1}: {2}",
+            $Url,
+            $_.Exception.GetType().Name,
+            $_.Exception.Message
+        ))
+        return
+    }
 
-    $Blog = Invoke-WebRequest https://sqlserverbuilds.blogspot.co.uk/ -ErrorAction Stop
+    $Releases = 'v.Next', '2016', '2014', '2012', '2008 R2', '2008', '2005', '2000', '7.0'
+    $TableNums = $Version | foreach {$Releases.IndexOf($_)}
 
     $Tables = $Blog.ParsedHtml.getElementsByTagName('Table') | select -Skip 2
 
     $Output = New-Object System.Collections.Generic.List[psobject](1200)
 
-    foreach ($Table in $Tables) {
-        $Rows = $Table.Rows
+    foreach ($TableNum in $TableNums) {
+        $Rows = $Tables[$TableNum].Rows
         $HeaderCells = $Rows[0].Cells | foreach {$_.innerText}
         foreach ($Row in ($Rows | select -Skip 1)){
 
             $Cells = $Row.Cells | foreach {$_.innerText}
-        
-            $RowObj = New-Object psobject
+            
+            $Href = $Row.getElementsByTagName('A') | foreach {$_.href} | select -First 1
+            
+            $RowObj = New-Object psobject -Property @{
+                Release = $Releases[$TableNum];
+                Link = $Href;
+            }
+
             for ($i=0; $i -lt $HeaderCells.Count; $i++) {
                 $Property = $HeaderCells[$i]
                 $ValueText = $Cells[$i]
@@ -34,8 +60,7 @@ function Get-SqlVersionTable {
                 $RowObj | Add-Member NoteProperty -Name $Property -Value $Value
             }
         
-            $Href = $Row.getElementsByTagName('A') | foreach {$_.href} | select -First 1
-            $RowObj | Add-Member NoteProperty -Name Link -Value $Href
+
 
             $Output.Add($RowObj)
         }
