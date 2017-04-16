@@ -1,4 +1,7 @@
 ﻿
+$Script:AllSqlReleases = 'v.Next', '2016', '2014', '2012', '2008 R2', '2008', '2005', '2000', '7.0'
+
+
 function Get-SqlVersionTable {
     <#
         .Synopsis
@@ -40,9 +43,9 @@ function Get-SqlVersionTable {
     #>
     param(
         [Parameter(Position=0)]
-        [Alias('Release')]
+        [Alias('Version')]
         [ValidateSet('v.Next', '2016', '2014', '2012', '2008 R2', '2008', '2005', '2000', '7.0')]
-        [string[]]$Version = ('2016', '2014', '2012', '2008 R2'),
+        [string[]]$Release = ('2016', '2014', '2012', '2008 R2'),
 
         [Parameter(Position=1)]
         [ValidateSet('CTP', 'RC', 'RTM', 'GDR', 'Hotfix', 'CU', 'SP', 'Update')]
@@ -53,15 +56,20 @@ function Get-SqlVersionTable {
 
     $XmlPath = "$PSScriptRoot\SqlVersionTable.xml"
     
+
+    #region Return from xml on disk
     $OutputFilter = {
-        $Version -contains $_.Release -and
+        $Release -contains $_.Release -and
         (-not $PSBoundParameters.ContainsKey('UpdateType') -or ($UpdateType -contains $_.UpdateType))
     }
     
     if (-not $Refresh -and (Test-Path $XmlPath)) {
         return Import-Clixml $XmlPath | where $OutputFilter
     }
-    
+    #endregion Return from xml on disk
+
+
+    #region Web request
     $Url = 'https://sqlserverbuilds.blogspot.com/'
     try {
         $Blog = Invoke-WebRequest $Url -ErrorAction Stop
@@ -74,9 +82,11 @@ function Get-SqlVersionTable {
         ))
         return
     }
+    #endregion Web request
 
-    $Releases = 'v.Next', '2016', '2014', '2012', '2008 R2', '2008', '2005', '2000', '7.0'
-    $TableNums = 0..$Releases.Count
+
+    #region Parse web response
+    $TableNums = 0..$Script:AllSqlReleases.Count
 
     $Tables = $Blog.ParsedHtml.getElementsByTagName('Table') | select -Skip 2
 
@@ -85,6 +95,21 @@ function Get-SqlVersionTable {
     foreach ($TableNum in $TableNums) {
         $Rows = $Tables[$TableNum].Rows
         $HeaderCells = $Rows[0].Cells | foreach {$_.innerText}
+
+        #I find the column headers to be suboptimal
+        $Properties = foreach ($Header in $HeaderCells) {
+            switch ($Header.Trim()) {
+                'Build'               {'Version';break}
+                'SQLSERVR.EXE Build'  {'SqlservrExeVersion';break}
+                'File version'        {'FileVersion';break}
+                'Q'                   {'Q';break}
+                'KB'                  {'KB';break}
+                'KB / Description'    {'Description';break}
+                'Release Date'        {'ReleaseDate';break}
+                default               {throw 'Unsupported column header in blogpost web response'}
+            }
+        }
+
         foreach ($Row in ($Rows | select -Skip 1)){
 
             $Cells = $Row.Cells | foreach {$_.innerText}
@@ -92,19 +117,22 @@ function Get-SqlVersionTable {
             $Href = $Row.getElementsByTagName('A') | foreach {$_.href} | select -First 1
             
             $RowObj = New-Object psobject -Property @{
-                Release = $Releases[$TableNum];
+                Release = $Script:AllSqlReleases[$TableNum];
                 Link = $Href;
             }
 
             #Add properties dynamically based on table header. Not all tables have same columns
             for ($i=0; $i -lt $HeaderCells.Count; $i++) {
-                $Property = $HeaderCells[$i].Trim()
+
+                $Property = $Properties[$i]
+
                 $ValueText = $Cells[$i]
 
-                if ($Property -match 'build|version') {
+                if ($Property -imatch 'version') {
+                    #Blogpost just has to have that one cell that breaks parsing...
                     if ($ValueText -match "^12.0.5537 or 12.0.5538$") {$ValueText = "12.0.5537"}
                     $Value = [version]$ValueText
-                } elseif ($Property -match 'release date') {
+                } elseif ($Property -match 'ReleaseDate') {
                     $Value = try {
                         [datetime]($Cells[6] -replace '\s*\*new')
                     } catch {}
@@ -134,6 +162,8 @@ function Get-SqlVersionTable {
 
         }
     }
+    #endregion Parse web response
+
 
     try {
         $Output | Export-Clixml $XmlPath
