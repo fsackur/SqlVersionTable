@@ -12,6 +12,22 @@ Update-FormatData -AppendPath $PSScriptRoot\Dusty.Sql.format.ps1xml
 
 
 function Get-SqlLatestUpdate {
+    <#
+        .Synopsis
+        Returns the latest update available for a given SQL release
+
+        .Description
+        Returns the latest update for a given release of SQL (2008 R2 / 2012 / 2014 etc) that is at least as major as the specified update type. So, if you specify an update type of 'CU' but there are no CUs available for the latest SP, it will return the SP.
+
+        .Parameter Release
+        Specifies the SQL Server release to check updates for (2008 R2 / 2012 / 2014 etc)
+
+        .Parameter UpdateType
+        Specifies what level of update to include. Updates less major will not be returned. If you specify 'CU', you may get back 'CU', 'SP', or 'RTM'. Default: 'CU'
+
+        .Parameter MaxVersion
+        Specifies to ignore builds above this version.
+    #>
     [CmdletBinding()]
     [OutputType([Dusty.Sql.SqlServerBuild[]])]
     param(
@@ -19,7 +35,7 @@ function Get-SqlLatestUpdate {
         [Dusty.Sql.SqlServerRelease]$Release,
 
         [Parameter(Position=1)]
-        [Dusty.Sql.SqlUpdateType]$UpdateType = 'Hotfix',
+        [Dusty.Sql.SqlUpdateType]$UpdateType = 'CU',
 
         [Parameter(DontShow=$true)]
         [version]$MaxVersion
@@ -30,9 +46,7 @@ function Get-SqlLatestUpdate {
     } else {
         $VersionTable = Get-SqlVersionTable -Release $Release
     }
-
-    $MatchingTypes = [int][Dusty.Sql.SqlUpdateType]::RTM..[int]$UpdateType
-    
+   
     return $VersionTable | 
         where {[int]$_.UpdateType -le [int]$UpdateType} | 
         select -First 1
@@ -57,10 +71,10 @@ function Get-SqlNormalisedVersion {
 }
 
 
-function Get-SqlFriendlyVersion {
+function Get-SqlVersion {
     <#
         .Synopsis
-        Returns friendly version of SQL Server versions
+        Returns structured SQL Server version object
 
         .Parameter Version
         Version of SQL that you wish to get the friendly version for
@@ -79,16 +93,30 @@ function Get-SqlFriendlyVersion {
 
     $VersionTable = Get-SqlVersionTable -Release $Release
 
-    $Builds = @{
-        [Dusty.Sql.SqlUpdateType]::SP = $null;
+    $Builds = New-Object psobject -Property @{
+        [Dusty.Sql.SqlUpdateType]::RTM = $null;
+        [Dusty.Sql.SqlUpdateType]::SP = 1; #$null;
         [Dusty.Sql.SqlUpdateType]::CU = $null;
+        [Dusty.Sql.SqlUpdateType]::Update = $null;
         [Dusty.Sql.SqlUpdateType]::Hotfix = $null;
-        [Dusty.Sql.SqlUpdateType]::Update = $null
     }
 
-    $MatchedVersion
-    
-    
+    #start from the most minor verison of update
+    [int]$UpdateTypeToSearch = [int][Dusty.Sql.SqlUpdateType]::Hotfix
+
+    while ($UpdateTypeToSearch -ge [int][Dusty.Sql.SqlUpdateType]::RTM) {
+        $MatchedVersion = Get-SqlLatestUpdate `
+            -Release $Release `
+            -UpdateType ([Dusty.Sql.SqlUpdateType]$UpdateTypeToSearch) `
+            -MaxVersion $Version
+
+        if ($null -eq $MatchedVersion) {throw "hiya"}
+
+        $Builds.$($MatchedVersion.UpdateType) = $MatchedVersion
+
+        $UpdateTypeToSearch = [int]$MatchedVersion.UpdateType -1
+        $Version = $MatchedVersion.Version
+    }
 
     return $Builds
 
