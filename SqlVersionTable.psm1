@@ -185,8 +185,12 @@ function Get-SqlVersionTable {
 
     #region Return from xml on disk
     if (-not $Refresh) {
+        if ($Script:SQL_VERSION_TABLE) {
+            return $Script:SQL_VERSION_TABLE | where $OutputFilter
+        }
         if (Test-Path $XmlPath) {
-            return Import-Clixml $XmlPath | where $OutputFilter
+            $Script:SQL_VERSION_TABLE = Import-Clixml $XmlPath 
+            return $Script:SQL_VERSION_TABLE | where $OutputFilter
         } else {
             Write-Warning ([string]::Format(
                 "Version table not found at {0}",
@@ -288,6 +292,7 @@ function Get-SqlVersionTable {
 
 
     try {
+        $Script:SQL_VERSION_TABLE = $Output
         $Output | Export-Clixml $XmlPath
     } catch {
         Write-Warning ([string]::Format(
