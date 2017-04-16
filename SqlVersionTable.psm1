@@ -1,5 +1,44 @@
 ﻿
-$Script:AllSqlReleases = 'v.Next', '2016', '2014', '2012', '2008 R2', '2008', '2005', '2000', '7.0'
+try {
+    Add-Type -IgnoreWarnings -TypeDefinition '
+        namespace Dusty.Sql
+        {
+            public enum SqlServerRelease {
+                SqlvNext = 1400,
+                Sql2016 = 1300,
+                Sql2014 = 1200,
+                Sql2012 = 1100,
+                Sql2008R2 = 1050,
+                Sql2008 = 1000,
+                Sql2005 = 900,
+                Sql2000 = 800,
+                Sql7 = 700
+            }
+        }'
+} catch {
+    if ($_ -match "Cannot add type. The type name 'Dusty.Sql.SqlServerRelease' already exists") {}
+    else {throw}
+}
+
+try {
+    Add-Type -IgnoreWarnings -TypeDefinition '
+        namespace Dusty.Sql
+        {
+            public enum SqlUpdateType {
+                CTP,
+                RC,
+                RTM,
+                GDR,
+                SP,
+                CU,
+                Hotfix,
+                Update
+            }
+        }'
+} catch {
+    if ($_ -match "Cannot add type. The type name 'Dusty.Sql.SqlUpdateType' already exists") {}
+    else {throw}
+}
 
 
 function Get-SqlVersionTable {
@@ -22,9 +61,9 @@ function Get-SqlVersionTable {
         Specifies to update cached version table from sqlserverbuilds.blogspot.com
 
         .Example
-        PS C:\> Get-SqlVersionTable -Version '2008 R2', 2012, 2014 -UpdateType RTM, SP | ft Release, UpdateType, Build, 'KB / Description'
+        PS C:\> Get-SqlVersionTable -Release Sql2008R2, Sql2012, Sql2014 -UpdateType RTM, SP | ft Release, UpdateType, Version, Description
 
-        Release UpdateType Build      KB / Description                                  
+        Release UpdateType Version    Description                                  
         ------- ---------- -----      ----------------                                  
         2014    SP         12.0.5000  SQL Server 2014 Service Pack 2 (SP2)  Latest SP   
         2014    SP         12.0.4100  SQL Server 2014 Service Pack 1 (SP1)              
@@ -41,28 +80,28 @@ function Get-SqlVersionTable {
 
         Returns the build numbers of all RTM and SP releases of SQL Server 2008 R2 up to 2014
     #>
+    [CmdletBinding()]
+    [OutputType([psobject])]
     param(
         [Parameter(Position=0)]
         [Alias('Version')]
-        [ValidateSet('v.Next', '2016', '2014', '2012', '2008 R2', '2008', '2005', '2000', '7.0')]
-        [string[]]$Release = ('2016', '2014', '2012', '2008 R2'),
+        [Dusty.Sql.SqlServerRelease[]]$Release = ('Sql2016', 'Sql2014', 'Sql2012', 'Sql2008R2'),
 
         [Parameter(Position=1)]
-        [ValidateSet('CTP', 'RC', 'RTM', 'GDR', 'Hotfix', 'CU', 'SP', 'Update')]
-        [string[]]$UpdateType,
+        [Dusty.Sql.SqlUpdateType[]]$UpdateType,
 
-        [switch]$Refresh                
+        [switch]$Refresh
     )
 
     $XmlPath = "$PSScriptRoot\SqlVersionTable.xml"
     
-
-    #region Return from xml on disk
     $OutputFilter = {
         $Release -contains $_.Release -and
         (-not $PSBoundParameters.ContainsKey('UpdateType') -or ($UpdateType -contains $_.UpdateType))
     }
     
+
+    #region Return from xml on disk
     if (-not $Refresh -and (Test-Path $XmlPath)) {
         return Import-Clixml $XmlPath | where $OutputFilter
     }
@@ -86,29 +125,27 @@ function Get-SqlVersionTable {
 
 
     #region Parse web response
-    $TableNums = 0..$Script:AllSqlReleases.Count
+    $Releases = [System.Enum]::GetValues([Dusty.Sql.SqlServerRelease]) | sort -Descending
+    $TableNums = 0..($Releases.Count -1)
 
     $Tables = $Blog.ParsedHtml.getElementsByTagName('Table') | select -Skip 2
 
     $Output = New-Object System.Collections.Generic.List[psobject](1200)
 
     foreach ($TableNum in $TableNums) {
+        [Dusty.Sql.SqlServerRelease]$ThisRelease = $Releases[$TableNum]
         $Rows = $Tables[$TableNum].Rows
         $HeaderCells = $Rows[0].Cells | foreach {$_.innerText}
 
-        #I find the column headers to be suboptimal
-        $Properties = foreach ($Header in $HeaderCells) {
-            switch ($Header.Trim()) {
-                'Build'               {'Version';break}
-                'SQLSERVR.EXE Build'  {'SqlservrExeVersion';break}
-                'File version'        {'FileVersion';break}
-                'Q'                   {'Q';break}
-                'KB'                  {'KB';break}
-                'KB / Description'    {'Description';break}
-                'Release Date'        {'ReleaseDate';break}
-                default               {throw 'Unsupported column header in blogpost web response'}
-            }
+        #We want the property names in the output to be different to the column header names in the blogpost
+        if ($ThisRelease -eq [Dusty.Sql.SqlServerRelease]::Sql7) {
+            #HeaderCells = 'Build', 'SQLSERVR.EXE Build',                 'Q', 'KB', 'KB / Description', 'Release Date'
+            $Properties = 'Version', 'SqlservrExeVersion',                'Q', 'KB', 'Description',      'Release Date'
+        } else {
+            #HeaderCells = 'Build', 'SQLSERVR.EXE Build', 'File version', 'Q', 'KB', 'KB / Description', 'Release Date'
+            $Properties = 'Version', 'SqlservrExeVersion', 'FileVersion', 'Q', 'KB', 'Description',      'Release Date'
         }
+
 
         foreach ($Row in ($Rows | select -Skip 1)){
 
@@ -117,27 +154,23 @@ function Get-SqlVersionTable {
             $Href = $Row.getElementsByTagName('A') | foreach {$_.href} | select -First 1
             
             $RowObj = New-Object psobject -Property @{
-                Release = $Script:AllSqlReleases[$TableNum];
+                Release = $ThisRelease;
                 Link = $Href;
             }
 
             #Add properties dynamically based on table header. Not all tables have same columns
-            for ($i=0; $i -lt $HeaderCells.Count; $i++) {
-
+            for ($i=0; $i -lt $Properties.Count; $i++) {
                 $Property = $Properties[$i]
-
                 $ValueText = $Cells[$i]
 
                 if ($Property -imatch 'version') {
-                    #Blogpost just has to have that one cell that breaks parsing...
-                    if ($ValueText -match "^12.0.5537 or 12.0.5538$") {$ValueText = "12.0.5537"}
+                    if ($ValueText -match "^12.0.5537 or 12.0.5538$") {$ValueText = "12.0.5537"}  #Blogpost just _has_ to have that one cell that breaks parsing...
                     $Value = [version]$ValueText
+
                 } elseif ($Property -match 'ReleaseDate') {
-                    $Value = try {
-                        [datetime]($Cells[6] -replace '\s*\*new')
-                    } catch {}
-                }
-                else {
+                    $Value = [datetime]($ValueText -replace '\s*\*new')
+                
+                } else {
                     $Value = $ValueText
                 }
 
@@ -147,14 +180,14 @@ function Get-SqlVersionTable {
 
             $RowObj | Add-Member NoteProperty -Name UpdateType -Value $(
                 switch -Regex ($RowObj.'KB / Description') {
-                    'Hotfix|QFE' {'Hotfix'; break}
-                    'Community Technology Preview' {'CTP'; break}
-                    'Release Candidate' {'RC'; break}
-                    'RTM .* RTM' {'RTM'; break}
-                    'GDR' {'GDR'; break}
-                    'Cumulative update package \d+ \(CU\d+\)' {'CU'; break}
-                    '^(?!\d+ FIX).*Service Pack \d \(SP\d\)' {'SP'; break}
-                    default {'Update'}
+                    'Hotfix|QFE'                              {[Dusty.Sql.SqlUpdateType]::Hotfix; break}
+                    'Community Technology Preview'            {[Dusty.Sql.SqlUpdateType]::CTP; break}
+                    'Release Candidate'                       {[Dusty.Sql.SqlUpdateType]::RC; break}
+                    'RTM .* RTM'                              {[Dusty.Sql.SqlUpdateType]::RTM; break}
+                    'GDR'                                     {[Dusty.Sql.SqlUpdateType]::GDR; break}
+                    'Cumulative update package \d+ \(CU\d+\)' {[Dusty.Sql.SqlUpdateType]::CU; break}
+                    '^(?!\d+ FIX).*Service Pack \d \(SP\d\)'  {[Dusty.Sql.SqlUpdateType]::SP; break}
+                    default                                   {[Dusty.Sql.SqlUpdateType]::Update}
                 }
             )
 
