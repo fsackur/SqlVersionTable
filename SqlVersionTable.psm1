@@ -11,7 +11,74 @@ Update-FormatData -AppendPath $PSScriptRoot\Dusty.Sql.format.ps1xml
 #endregion Import custom types
 
 
+function Get-SqlFriendlyVersion {
+    <#
+        .Synopsis
+        Returns list of SQL Server versions
 
+        .Description
+        Queries the excellent internet resource sqlserverbuilds.blogspot.com for the close-to-exhaustive list of public SQL Server builds.
+
+        Returned objects include versions, descriptions and links to the relevant BK articles.
+
+        .Parameter Version
+        Filters output by SQL release, e.g. 2012, 2008 R2. Default: 2008 R2 up to 2016.
+
+        .Parameter UpdateType
+        Filters output by update type, e.g. SP, RTM, CU.
+
+        .Parameter Refresh
+        Specifies to update cached version table from sqlserverbuilds.blogspot.com
+
+        .Example
+        PS C:\> Get-SqlVersionTable -Release Sql2008R2, Sql2012, Sql2014 -UpdateType RTM, SP | ft Release, UpdateType, Version, Description
+
+        Release UpdateType Version    Description                                  
+        ------- ---------- -----      ----------------                                  
+        2014    SP         12.0.5000  SQL Server 2014 Service Pack 2 (SP2)  Latest SP   
+        2014    SP         12.0.4100  SQL Server 2014 Service Pack 1 (SP1)              
+        2014    SP         12.0.4050  SQL Server 2014 Service Pack 1 (SP1) [withdrawn]  
+        2014    RTM        12.0.2000  SQL Server 2014 RTM  RTM                          
+        2012    SP         11.0.6020  SQL Server 2012 Service Pack 3 (SP3)  Latest SP   
+        2012    SP         11.0.5058  SQL Server 2012 Service Pack 2 (SP2)              
+        2012    SP         11.0.3000  SQL Server 2012 Service Pack 1 (SP1)              
+        2012    RTM        11.0.2100  SQL Server 2012 RTM  RTM                          
+        2008 R2 SP         10.50.6000 SQL Server 2008 R2 Service Pack 3 (SP3)  Latest SP
+        2008 R2 SP         10.50.4000 SQL Server 2008 R2 Service Pack 2 (SP2)           
+        2008 R2 SP         10.50.2500 SQL Server 2008 R2 Service Pack 1 (SP1)           
+        2008 R2 RTM        10.50.1600 SQL Server 2008 R2 RTM  RTM                       
+
+        Returns the build numbers of all RTM and SP releases of SQL Server 2008 R2 up to 2014
+    #>
+    [CmdletBinding()]
+    [OutputType([Dusty.Sql.SqlServerBuild[]])]
+    param(
+        [Parameter(Position=0)]
+        [version]$Version
+    )
+
+    #Hack for 2008 R2 minor version 50/51/52 weirdness
+    if ($Version.Minor -gt 50) {
+        $Version = [version](
+            [regex]::Replace(
+                $Version.ToString(),
+                '(?<=^\d+)\.5\d\.',
+                '.50.'
+            )
+        )
+    }
+
+    $Release = [Dusty.Sql.SqlServerRelease]($Version.Major * 100 + $Version.Minor)
+
+    $VersionTable = Get-SqlVersionTable -Release $Release
+
+    #Get the 'known' build number
+    $MatchedVersion = $VersionTable | where {$_.Version -le $Version} | select -First 1
+    
+
+    return $MatchedVersion
+
+}
 
 
 function Get-SqlVersionTable {
