@@ -226,7 +226,7 @@ function Get-SqlVersionTable {
             
 
             $RowObj.UpdateType = $(
-                switch -Regex ($RowObj.'KB / Description') {
+                switch -Regex ($RowObj.Description) {
                     'Hotfix|QFE'                              {[Dusty.Sql.SqlUpdateType]::Hotfix; break}
                     'Community Technology Preview'            {[Dusty.Sql.SqlUpdateType]::CTP; break}
                     'Release Candidate'                       {[Dusty.Sql.SqlUpdateType]::RC; break}
