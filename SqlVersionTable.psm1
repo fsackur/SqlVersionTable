@@ -11,6 +11,9 @@ Update-FormatData -AppendPath $PSScriptRoot\Dusty.Sql.format.ps1xml
 #endregion Import custom types
 
 
+
+
+
 function Get-SqlVersionTable {
     <#
         .Synopsis
@@ -72,8 +75,15 @@ function Get-SqlVersionTable {
     
 
     #region Return from xml on disk
-    if (-not $Refresh -and (Test-Path $XmlPath)) {
-        return Import-Clixml $XmlPath | where $OutputFilter
+    if (-not $Refresh) {
+        if (Test-Path $XmlPath) {
+            return Import-Clixml $XmlPath | where $OutputFilter
+        } else {
+            Write-Warning ([string]::Format(
+                "Version table not found at {0}",
+                $XmlPath
+            ))
+        }
     }
     #endregion Return from xml on disk
 
