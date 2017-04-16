@@ -15,14 +15,14 @@
 
     public enum SqlUpdateType
     {
-        CTP,
-        RC,
-        RTM,
-        GDR,
-        SP,
-        CU,
-        Hotfix,
-        Update
+        RTM = 0,
+        SP = 1,
+        CU = 2,
+        GDR = 3,
+        Update = 4,
+        Hotfix = 5,
+        RC = 6,
+        CTP = 7
     }
 
     public class SqlServerBuild
