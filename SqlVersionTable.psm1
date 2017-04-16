@@ -1,44 +1,14 @@
 ﻿
+#region Import custom types
 try {
-    Add-Type -IgnoreWarnings -TypeDefinition '
-        namespace Dusty.Sql
-        {
-            public enum SqlServerRelease {
-                SqlvNext = 1400,
-                Sql2016 = 1300,
-                Sql2014 = 1200,
-                Sql2012 = 1100,
-                Sql2008R2 = 1050,
-                Sql2008 = 1000,
-                Sql2005 = 900,
-                Sql2000 = 800,
-                Sql7 = 700
-            }
-        }'
+    Add-Type -Path $PSScriptRoot\Dusty.Sql.Version.cs -ErrorAction Stop
 } catch {
-    if ($_ -match "Cannot add type. The type name 'Dusty.Sql.SqlServerRelease' already exists") {}
+    if ($_ -match "Cannot add type. The type name .* already exists") {}
     else {throw}
 }
 
-try {
-    Add-Type -IgnoreWarnings -TypeDefinition '
-        namespace Dusty.Sql
-        {
-            public enum SqlUpdateType {
-                CTP,
-                RC,
-                RTM,
-                GDR,
-                SP,
-                CU,
-                Hotfix,
-                Update
-            }
-        }'
-} catch {
-    if ($_ -match "Cannot add type. The type name 'Dusty.Sql.SqlUpdateType' already exists") {}
-    else {throw}
-}
+Update-FormatData -AppendPath $PSScriptRoot\Dusty.Sql.format.ps1xml
+#endregion Import custom types
 
 
 function Get-SqlVersionTable {
@@ -81,7 +51,7 @@ function Get-SqlVersionTable {
         Returns the build numbers of all RTM and SP releases of SQL Server 2008 R2 up to 2014
     #>
     [CmdletBinding()]
-    [OutputType([psobject])]
+    [OutputType([Dusty.Sql.SqlServerBuild[]])]
     param(
         [Parameter(Position=0)]
         [Alias('Version')]
@@ -133,17 +103,17 @@ function Get-SqlVersionTable {
     $Output = New-Object System.Collections.Generic.List[psobject](1200)
 
     foreach ($TableNum in $TableNums) {
-        [Dusty.Sql.SqlServerRelease]$ThisRelease = $Releases[$TableNum]
+        $ThisRelease = $Releases[$TableNum]
         $Rows = $Tables[$TableNum].Rows
         $HeaderCells = $Rows[0].Cells | foreach {$_.innerText}
 
         #We want the property names in the output to be different to the column header names in the blogpost
         if ($ThisRelease -eq [Dusty.Sql.SqlServerRelease]::Sql7) {
             #HeaderCells = 'Build', 'SQLSERVR.EXE Build',                 'Q', 'KB', 'KB / Description', 'Release Date'
-            $Properties = 'Version', 'SqlservrExeVersion',                'Q', 'KB', 'Description',      'Release Date'
+            $Properties = 'Version', 'SqlservrExeVersion',                'Q', 'KB', 'Description',      'ReleaseDate'
         } else {
             #HeaderCells = 'Build', 'SQLSERVR.EXE Build', 'File version', 'Q', 'KB', 'KB / Description', 'Release Date'
-            $Properties = 'Version', 'SqlservrExeVersion', 'FileVersion', 'Q', 'KB', 'Description',      'Release Date'
+            $Properties = 'Version', 'SqlservrExeVersion', 'FileVersion', 'Q', 'KB', 'Description',      'ReleaseDate'
         }
 
 
@@ -153,32 +123,32 @@ function Get-SqlVersionTable {
             
             $Href = $Row.getElementsByTagName('A') | foreach {$_.href} | select -First 1
             
-            $RowObj = New-Object psobject -Property @{
-                Release = $ThisRelease;
-                Link = $Href;
-            }
+            $RowObj = New-Object Dusty.Sql.SqlServerBuild
+            $RowObj.Release = $ThisRelease
+            $RowObj.Link = $Href
 
             #Add properties dynamically based on table header. Not all tables have same columns
             for ($i=0; $i -lt $Properties.Count; $i++) {
                 $Property = $Properties[$i]
                 $ValueText = $Cells[$i]
 
+                Write-Debug "$Property : $ValueText"
+
                 if ($Property -imatch 'version') {
-                    if ($ValueText -match "^12.0.5537 or 12.0.5538$") {$ValueText = "12.0.5537"}  #Blogpost just _has_ to have that one cell that breaks parsing...
-                    $Value = [version]$ValueText
+                    if (-not [string]::IsNullOrWhiteSpace($ValueText)) {
+                        $RowObj.$Property = ($ValueText -replace '\s.*')   #Blogpost just _has_ to have that one cell that breaks parsing...
+                    }
 
                 } elseif ($Property -match 'ReleaseDate') {
-                    $Value = [datetime]($ValueText -replace '\s*\*new')
+                    $null = [datetime]::TryParse(($ValueText -replace '\s*\*new'), ([ref]$RowObj.ReleaseDate))
                 
                 } else {
-                    $Value = $ValueText
+                    $RowObj.$Property = $ValueText
                 }
-
-                $RowObj | Add-Member NoteProperty -Name $Property -Value $Value
             } #end for
             
 
-            $RowObj | Add-Member NoteProperty -Name UpdateType -Value $(
+            $RowObj.UpdateType = $(
                 switch -Regex ($RowObj.'KB / Description') {
                     'Hotfix|QFE'                              {[Dusty.Sql.SqlUpdateType]::Hotfix; break}
                     'Community Technology Preview'            {[Dusty.Sql.SqlUpdateType]::CTP; break}
