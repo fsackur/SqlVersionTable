@@ -52,7 +52,7 @@ function Get-SqlLatestUpdate {
         select -First 1
 }
 
-function Get-SqlNormalisedVersion {
+function ConvertTo-NormalizedSqlVersion {
     #Hack for 2008 R2 minor version 50/51/52 weirdness
     param(
         [Parameter(Mandatory=$true, Position=0)]
@@ -87,7 +87,7 @@ function Get-SqlVersion {
         [version]$Version
     )
 
-    $Version = Get-SqlNormalisedVersion $Version
+    $Version = ConvertTo-NormalizedSqlVersion $Version
 
     $Release = [Dusty.Sql.SqlServerRelease]($Version.Major * 100 + $Version.Minor)
 
